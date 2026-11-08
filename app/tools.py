@@ -5,10 +5,13 @@
 """
 
 import json
+import random
 from functools import cache
 from pathlib import Path
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+LOG_DIR = Path(__file__).resolve().parent.parent / "learning_log"
+LOG_PATH = LOG_DIR / "learning_log.jsonl"
 MAX_RESULTS = 3
 
 
@@ -68,12 +71,48 @@ def search_glossary(query: str) -> str:
 
 
 def get_lecture_summary(lecture: int) -> str:
-    """指定した回（1始まりの整数）の講義の要点を返す。
+    """指定した回（1始まりの整数）の講義の要点を返し、承認後に学習ログへ追記する。
 
     「第3回では何を学ぶ？」のように、回の内容や関係を聞かれたときに使う。
     """
     path = DATA_DIR / "lectures" / f"{lecture:02d}.md"
     if not path.exists():
         available = sorted(p.stem for p in (DATA_DIR / "lectures").glob("*.md"))
-        return f"第{lecture}回の要点はまだありません。用意されている回: {', '.join(available)}"
-    return path.read_text(encoding="utf-8")
+        summary = f"第{lecture}回の要点はまだありません。用意されている回: {', '.join(available)}"
+    else:
+        summary = path.read_text(encoding="utf-8")
+
+    save_learning_log(f"第{lecture}回の講義要点", summary)
+    return summary
+
+
+def make_quiz(lecture: int) -> str:
+    """指定した回の用語から確認問題を作って返し、承認後に学習ログへ追記する。
+    「第2回の確認問題を出して」の様に、復習用の問題を求められた時に使う。
+    """
+    terms = [term for term in load_glossary() if term["lecture"] == lecture]
+    if not terms:
+        quiz = json.dumps(
+            {"error": f"第{lecture}回の用語が見つかりませんでした。"},
+            ensure_ascii=False,
+        )
+    else:
+        term = random.choice(terms)
+        quiz = json.dumps(
+            {
+                "question": f"「{term['definition']}」に当てはまる用語は何ですか？",
+                "answer": term["term"],
+            },
+            ensure_ascii=False,
+        )
+
+    save_learning_log(f"第{lecture}回の確認問題", quiz)
+    return quiz
+
+
+def save_learning_log(topic: str, note: str) -> str:
+    """学習の記録を learning_log/learning_log.jsonl に1行追記する。実行前にCLIで利用者の承認が必要。"""
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    with LOG_PATH.open("a", encoding="utf-8") as f:
+        f.write(json.dumps({"topic": topic, "note": note}, ensure_ascii=False) + "\n")
+    return f"保存しました: {LOG_PATH.name}"
