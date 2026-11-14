@@ -24,7 +24,7 @@ sys.path.insert(0, str(ROOT))
 from app import tools  # noqa: E402
 from app.judge import ALL_CRITERIA, check_lecture_mark, load_labels, read_jsonl, write_jsonl  # noqa: E402
 
-DEFAULT_CASES = ROOT / "data" / "eval" / "lec04_cases.jsonl"
+DEFAULT_CASES = ROOT / "data" / "eval" / "my_cases.jsonl"
 DEFAULT_LABELS = ROOT / "lectures" / "04" / "labels.jsonl"
 INSTRUCTOR_LABELS = ROOT / "lectures" / "04" / "reference" / "labels_instructor.jsonl"
 MY_CASES = ROOT / "data" / "eval" / "my_cases.jsonl"
