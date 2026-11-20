@@ -124,10 +124,44 @@ def open_index(path: Path):
         db.close()
 
 
+def _include_adjacent_pages(hits: list[dict], pages: list[dict]) -> list[dict]:
+    """検索一致ページに、同じ資料内の未掲載な前後ページを追加する。"""
+    pages_by_document = defaultdict(list)
+    positions = {}
+    for page in pages:
+        positions[page["page_id"]] = (page["document_id"], len(pages_by_document[page["document_id"]]))
+        pages_by_document[page["document_id"]].append(page)
+
+    results = []
+    seen = set()
+    matched_hits = []
+    for hit in hits:
+        if hit["page_id"] in seen:
+            continue
+        seen.add(hit["page_id"])
+        matched_hits.append(hit)
+        results.append({**hit, "is_context": False})
+
+    for hit in matched_hits:
+        position = positions.get(hit["page_id"])
+        if position is None:
+            continue
+        document_id, index = position
+        document_pages = pages_by_document[document_id]
+        for neighbor_index in (index - 1, index + 1):
+            if 0 <= neighbor_index < len(document_pages):
+                neighbor = document_pages[neighbor_index]
+                if neighbor["page_id"] not in seen:
+                    seen.add(neighbor["page_id"])
+                    results.append({**neighbor, "is_context": True})
+    return results
+
+
 def search(query: str) -> list[dict]:
-    """質問を埋め込み、近いページを最大RAG_TOP_K件返す。"""
+    """質問を埋め込み、近いページと同じ資料内の前後ページを返す。"""
     if not isinstance(query, str) or not query.strip():
         raise ValueError("検索語が空です。")
+    pages = load_pages(RAG_SOURCE)
     with open_index(RAG_DB) as db:
         vector = embed_text(query.strip(), "RETRIEVAL_QUERY")
         rows = db.execute("""
@@ -135,7 +169,7 @@ def search(query: str) -> list[dict]:
                    vec_distance_cosine(embedding, ?) AS distance
             FROM chunks ORDER BY distance, page_id LIMIT ?
         """, (sqlite_vec.serialize_float32(vector), RAG_TOP_K))
-        return [dict(row) for row in rows]
+        return _include_adjacent_pages([dict(row) for row in rows], pages)
 
 
 def search_graph(query: str) -> dict:
@@ -151,7 +185,9 @@ def search_graph(query: str) -> dict:
             adjacent[a].add(b)
             adjacent[b].add(a)
 
-    seeds = [hit for hit in search(query) if hit["page_id"] in pages][:min(GRAPH_START_K, GRAPH_MAX_RESULTS)]
+    seeds = [hit for hit in search(query)
+             if not hit.get("is_context", False) and hit["page_id"] in pages][
+                 :min(GRAPH_START_K, GRAPH_MAX_RESULTS)]
     seed_ids = {seed["page_id"] for seed in seeds}
     results, candidates = [], {}
     for rank, seed in enumerate(seeds):
@@ -208,4 +244,6 @@ if __name__ == "__main__":
         print(f"章: {result['section']}")
         print(f"タイトル: {result['title']}")
         print(f"ページ: {result['page']}")
+        if result["is_context"]:
+            print("（前後ページ）")
         print(f"\n{result['content']}")
